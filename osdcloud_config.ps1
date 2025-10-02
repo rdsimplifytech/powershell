@@ -1,22 +1,27 @@
-# osdcloud_config.ps1 - Custom MSP Config for NinjaOne Integration
+# osdcloud_config.ps1 - MSP Custom for NinjaOne and Migration
 
-# Install NinjaOne Agent Silently (use env vars for multi-tenancy)
-$orgId = Read-Host "Enter Client Organization ID"  # Prompt tech for client-specific ID (semi-zero-touch)
+# Prompt for Client Org ID (semi-zero-touch; automate via USB param file for full zero-touch)
+$orgId = Read-Host "Enter NinjaOne Client Organization ID"
+
+# Install NinjaOne Agent
 Start-Process msiexec -ArgumentList "/i C:\OSDCloud\Automate\Provisioning\NinjaRMMAgent.msi /qn ORGANIZATION_ID=$orgId" -Wait
 
-# Inventory and Data Restore Trigger (post-OS install, via NinjaOne policy)
-# Assume old device backup stored in secure cloud (e.g., OneDrive link from NinjaOne custom field)
+# Data Restore: Pull encrypted backup from client-segregated storage (e.g., OneDrive/Azure)
 $machineName = $env:COMPUTERNAME
-$backupUrl = "https://your-secure-storage/$orgId/$machineName/backup.zip"  # Encrypted, client-segregated
-Invoke-WebRequest -Uri $backupUrl -OutFile "C:\Temp\backup.zip"
-Expand-Archive "C:\Temp\backup.zip" -DestinationPath "C:\Users"  # Restore user data
+$backupUrl = "https://your-msp-storage/$orgId/$machineName/backup.zip"  # Use SAS token for security
+Invoke-WebRequest -Uri $backupUrl -OutFile "C:\Temp\backup.zip" -UseBasicParsing
+Expand-Archive "C:\Temp\backup.zip" -DestinationPath "C:\Users"  # Restore profiles/files
 
-# Apply NinjaOne Policies: App installs, compliance (trigger via agent)
-# Example: Run Ninja script for inventory import
-Invoke-Expression (Invoke-WebRequest -Uri "https://your-ninja-api/scripts/inventory_import.ps1").Content
+# Inventory Import: Run NinjaOne script to upload old device's app/settings inventory
+Invoke-Expression (Invoke-WebRequest -Uri "https://your-ninja-api/scripts/inventory_import.ps1" -UseBasicParsing).Content
 
-# Entra ID/Domain Join (if not in unattend.xml)
-if ($env:EntraJoin -eq 'Yes') { dsregcmd /join /silent }  # Use env vars from params
+# Domain/Entra ID Join (if not in unattend.xml)
+$joinType = Read-Host "Join Domain (D) or Entra ID (E)?"
+if ($joinType -eq 'D') {
+    Add-Computer -DomainName "clientdomain.com" -Credential (Get-Credential)  # Secure creds prompt
+} elseif ($joinType -eq 'E') {
+    dsregcmd /join /silent
+}
 
 # Cleanup and Reboot
 Remove-Item "C:\Temp\backup.zip"
